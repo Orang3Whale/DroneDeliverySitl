@@ -3,10 +3,14 @@
 """
 ROS 无人机自主送货控制节点 (Delivery Mission Node)
 
-基于有限状态机 (FSM) 实现 PX4 四旋翼无人机的自主送货任务:
-  INIT -> SET_OFFBOARD_ARM -> TAKEOFF -> GO_TO_A -> HOVER_A -> GO_TO_B -> AUTO_LAND -> DONE
+基于有限状态机 (FSM) 实现 PX4 四旋翼无人机的自主多航点送货任务:
 
-    任务路线: 起飞点 (0,0) -> 取货点 A (4,4) -> 送货点 B (15,12) -> 降落
+    INIT -> SET_OFFBOARD_ARM -> TAKEOFF
+       -> GO_TO_WAYPOINT[0] -> HOVER_WAYPOINT[0]
+       -> GO_TO_WAYPOINT[1] -> HOVER_WAYPOINT[1]
+       -> ... -> AUTO_LAND -> DONE
+
+    航点从 YAML 配置文件加载, 支持任意数量的航点及每点独立悬停时长。
 
 环境依赖:
     - ROS Noetic (Ubuntu 20.04)
@@ -63,23 +67,24 @@ class PX4DeliveryDrone:
         # ------------------------------------------------------------------
         # 3. 任务核心参数定义
         # ------------------------------------------------------------------
-        # 显式 float() 转换，防止 launch 文件传入字符串类型 (如 rosparam + arg 替换)
+        # 显式 float() 转换，防止 launch 文件传入字符串类型
         self.takeoff_alt = float(rospy.get_param("~takeoff_altitude", 2.5))
         self.pos_tolerance = float(rospy.get_param("~position_tolerance", 0.3))
-        self.hover_count_target = float(rospy.get_param("~hover_seconds", 5.0))
 
-        # A 点坐标 (取货点)
-        self.point_A = {
-            "x": float(rospy.get_param("~point_A/x", 4.0)),
-            "y": float(rospy.get_param("~point_A/y", 4.0)),
-            "z": float(rospy.get_param("~point_A/z", 2.5)),
-        }
-        # B 点坐标 (送货点)
-        self.point_B = {
-            "x": float(rospy.get_param("~point_B/x", 15.0)),
-            "y": float(rospy.get_param("~point_B/y", 12.0)),
-            "z": float(rospy.get_param("~point_B/z", 2.5)),
-        }
+        # 加载航点列表 (支持从 YAML 文件或 ROS param 注入)
+        self.waypoints = self._load_waypoints()
+        if not self.waypoints:
+            rospy.logerr("航点列表为空！至少需要一个航点。")
+            raise ValueError("Empty waypoints list")
+
+        rospy.loginfo(
+            f"已加载 {len(self.waypoints)} 个航点:"
+        )
+        for i, wp in enumerate(self.waypoints):
+            rospy.loginfo(
+                f"  [{i}] x={wp['x']:.1f}, y={wp['y']:.1f}, "
+                f"z={wp['z']:.1f}, hover={wp['hover_time']:.1f}s"
+            )
 
         # ------------------------------------------------------------------
         # 4. 内部状态变量
@@ -90,11 +95,10 @@ class PX4DeliveryDrone:
 
         # 有限状态机当前状态
         self.current_mission_state = "INIT"
-
-        # HOVER 阶段计数器
+        # 当前航点索引 (GO_TO_WAYPOINT / HOVER_WAYPOINT 共用)
+        self.current_wp_index = 0
+        # HOVER 阶段计数器 (每次进入 HOVER_WAYPOINT 时清零)
         self.hover_counter = 0
-        # 悬停目标循环次数 = 悬停秒数 * 发布频率 (20 Hz)
-        self.hover_target_loops = int(self.hover_count_target * 20)
 
         # ------------------------------------------------------------------
         # 5. 订阅者 (Subscribers)
@@ -186,6 +190,59 @@ class PX4DeliveryDrone:
         distance = math.sqrt(dx * dx + dy * dy + dz * dz)
         return distance < self.pos_tolerance
 
+    def _load_waypoints(self):
+        """
+        从 ROS 参数服务器加载航点列表。
+
+        期望的 YAML 格式:
+            waypoints:
+              - x: 4.0
+                y: 4.0
+                z: 2.5
+                hover_time: 5.0    # 到达后悬停秒数, 0 = 途经点
+              - x: 15.0
+                y: 12.0
+                z: 2.5
+                hover_time: 0.0
+
+        Returns:
+            list[dict]: 解析后的航点列表，所有值已转为 float。
+        """
+        raw = rospy.get_param("~waypoints", [])
+        if not raw:
+            rospy.logwarn("未找到 ~waypoints 参数，尝试加载旧格式 point_A/B 兼容...")
+            # 向后兼容: 如果 launch 文件尚未更新，尝试从 point_A/point_B 合成
+            raw = rospy.get_param("~waypoints", None)
+            if raw is None:
+                # 从旧格式自动合成，确保已有任务不受影响
+                raw = []
+                if rospy.has_param("~point_A/x"):
+                    raw.append({
+                        "x": float(rospy.get_param("~point_A/x")),
+                        "y": float(rospy.get_param("~point_A/y")),
+                        "z": float(rospy.get_param("~point_A/z")),
+                        "hover_time": float(rospy.get_param("~hover_seconds", 5.0)),
+                    })
+                    rospy.loginfo("从旧格式 point_A 合成航点 [0]")
+                if rospy.has_param("~point_B/x"):
+                    raw.append({
+                        "x": float(rospy.get_param("~point_B/x")),
+                        "y": float(rospy.get_param("~point_B/y")),
+                        "z": float(rospy.get_param("~point_B/z")),
+                        "hover_time": 0.0,
+                    })
+                    rospy.loginfo("从旧格式 point_B 合成航点 [1]")
+
+        waypoints = []
+        for wp in raw:
+            waypoints.append({
+                "x": float(wp["x"]),
+                "y": float(wp["y"]),
+                "z": float(wp["z"]),
+                "hover_time": float(wp.get("hover_time", 0.0)),
+            })
+        return waypoints
+
     def _check_failsafe(self):
         """
         检查飞控连接及模式状态，异常时抛出 MissionAbortException。
@@ -199,8 +256,8 @@ class PX4DeliveryDrone:
 
         # OFFBOARD 阶段若被外部干预切走模式也应中止
         offboard_states = [
-            "SET_OFFBOARD_ARM", "TAKEOFF", "GO_TO_A",
-            "HOVER_A", "GO_TO_B",
+            "SET_OFFBOARD_ARM", "TAKEOFF",
+            "GO_TO_WAYPOINT", "HOVER_WAYPOINT",
         ]
         if (self.current_mission_state in offboard_states
                 and self.current_state.mode != "OFFBOARD"):
@@ -264,13 +321,16 @@ class PX4DeliveryDrone:
 
     def run_mission(self):
         """
-        有限状态机主循环 —— 按顺序驱动送货任务。
+        有限状态机主循环 —— 按顺序驱动多航点送货任务。
 
         状态流转:
-            INIT -> SET_OFFBOARD_ARM -> TAKEOFF -> GO_TO_A
-            -> HOVER_A -> GO_TO_B -> AUTO_LAND -> DONE
+            INIT -> SET_OFFBOARD_ARM -> TAKEOFF
+               -> GO_TO_WAYPOINT[0] -> HOVER_WAYPOINT[0]
+               -> GO_TO_WAYPOINT[1] -> HOVER_WAYPOINT[1]
+               -> ... -> AUTO_LAND -> DONE
         """
-        rospy.loginfo("====== 送货任务启动 ======")
+        rospy.loginfo("====== 多航点送货任务启动 ======")
+        rospy.loginfo(f"共计 {len(self.waypoints)} 个航点")
 
         while not rospy.is_shutdown():
 
@@ -291,14 +351,11 @@ class PX4DeliveryDrone:
             elif self.current_mission_state == "TAKEOFF":
                 self._handle_takeoff()
 
-            elif self.current_mission_state == "GO_TO_A":
-                self._handle_go_to_A()
+            elif self.current_mission_state == "GO_TO_WAYPOINT":
+                self._handle_go_to_waypoint()
 
-            elif self.current_mission_state == "HOVER_A":
-                self._handle_hover_A()
-
-            elif self.current_mission_state == "GO_TO_B":
-                self._handle_go_to_B()
+            elif self.current_mission_state == "HOVER_WAYPOINT":
+                self._handle_hover_waypoint()
 
             elif self.current_mission_state == "AUTO_LAND":
                 self._handle_auto_land()
@@ -358,74 +415,107 @@ class PX4DeliveryDrone:
         """
         TAKEOFF 状态:
             在原点 (0, 0) 垂直起飞至 takeoff_alt 高度。
-            到达高度阈值后转入 GO_TO_A。
+            到达高度阈值后转入第一个航点。
         """
         self.target_pose = self._build_setpoint(0.0, 0.0, self.takeoff_alt)
 
         if self.is_arrived({"x": 0.0, "y": 0.0, "z": self.takeoff_alt}):
             rospy.loginfo(
-                f"[TAKEOFF] 到达目标高度 {self.takeoff_alt:.1f} m，前往取货点 A。"
+                f"[TAKEOFF] 到达目标高度 {self.takeoff_alt:.1f} m，"
+                f"前往航点 [0/{len(self.waypoints)-1}]。"
             )
-            self.current_mission_state = "GO_TO_A"
-            rospy.loginfo("[TAKEOFF] -> GO_TO_A")
+            self.current_wp_index = 0
+            self.current_mission_state = "GO_TO_WAYPOINT"
+            rospy.loginfo("[TAKEOFF] -> GO_TO_WAYPOINT[0]")
 
-    def _handle_go_to_A(self):
+    # =================================================================
+    # 通用航点导航 & 悬停 (替代原先硬编码的 GO_TO_A / HOVER_A / GO_TO_B)
+    # =================================================================
+
+    def _handle_go_to_waypoint(self):
         """
-        GO_TO_A 状态:
-            发布 A 点坐标，到达后转入 HOVER_A。
+        GO_TO_WAYPOINT 状态:
+            发布当前航点目标坐标, 到达后根据 hover_time 决定:
+              - hover_time > 0: 转入 HOVER_WAYPOINT 悬停
+              - hover_time = 0: 途经点, 直接跳至下一航点或 AUTO_LAND
 
             (拓展接口): 可在此处添加前方相机 / 雷达避障检测逻辑。
         """
-        self.target_pose = self._build_setpoint(
-            self.point_A["x"], self.point_A["y"], self.point_A["z"]
-        )
+        wp = self.waypoints[self.current_wp_index]
+        self.target_pose = self._build_setpoint(wp["x"], wp["y"], wp["z"])
 
-        if self.is_arrived(self.point_A):
-            rospy.loginfo("[GO_TO_A] 已到达取货点 A，开始悬停等待。")
-            self.hover_counter = 0
-            self.current_mission_state = "HOVER_A"
-            rospy.loginfo("[GO_TO_A] -> HOVER_A")
+        if self.is_arrived(wp):
+            idx = self.current_wp_index
+            total = len(self.waypoints) - 1
 
-    def _handle_hover_A(self):
+            if wp["hover_time"] > 0:
+                rospy.loginfo(
+                    f"[GO_TO_WP] 到达航点 [{idx}/{total}] "
+                    f"({wp['x']:.1f}, {wp['y']:.1f}), "
+                    f"悬停 {wp['hover_time']:.1f}s。"
+                )
+                self.hover_counter = 0
+                self.current_mission_state = "HOVER_WAYPOINT"
+                rospy.loginfo(f"[GO_TO_WP] -> HOVER_WAYPOINT[{idx}]")
+            else:
+                # 途经点 (hover_time=0), 直接推进
+                rospy.loginfo(
+                    f"[GO_TO_WP] 途经航点 [{idx}/{total}] "
+                    f"({wp['x']:.1f}, {wp['y']:.1f}), 不做停留。"
+                )
+                self._advance_or_land()
+
+    def _handle_hover_waypoint(self):
         """
-        HOVER_A 状态:
-            在 A 点上方悬停指定时长 (默认 5 秒)，模拟取货过程。
+        HOVER_WAYPOINT 状态:
+            在当前航点上方悬停, 计数器到达后推进至下一航点或降落。
 
-            (拓展接口): 可在此处触发下游相机识别降落标志，
+            (拓展接口): 可在此处触发下游相机识别降落标志,
                         或进行视觉精调 / 机械臂抓取。
         """
-        self.target_pose = self._build_setpoint(
-            self.point_A["x"], self.point_A["y"], self.point_A["z"]
-        )
+        wp = self.waypoints[self.current_wp_index]
+        self.target_pose = self._build_setpoint(wp["x"], wp["y"], wp["z"])
 
+        hover_loops = int(wp["hover_time"] * 20)  # 20 Hz
         self.hover_counter += 1
-        if self.hover_counter >= self.hover_target_loops:
+
+        if self.hover_counter >= hover_loops:
             rospy.loginfo(
-                f"[HOVER_A] 悬停完成 ({self.hover_count_target:.0f} s)，"
-                f"前往送货点 B。"
+                f"[HOVER_WP] 航点 [{self.current_wp_index}] "
+                f"悬停完成 ({wp['hover_time']:.1f}s)。"
             )
-            self.current_mission_state = "GO_TO_B"
-            rospy.loginfo("[HOVER_A] -> GO_TO_B")
+            self._advance_or_land()
         else:
-            remaining = self.hover_count_target - self.hover_counter / 20.0
+            remaining = wp["hover_time"] - self.hover_counter / 20.0
             rospy.loginfo_throttle(
                 1.0,
-                f"[HOVER_A] 悬停中... 剩余 {remaining:.1f} s",
+                f"[HOVER_WP] 航点 [{self.current_wp_index}] "
+                f"悬停中... 剩余 {remaining:.1f}s",
             )
 
-    def _handle_go_to_B(self):
+    def _advance_or_land(self):
         """
-        GO_TO_B 状态:
-            发布 B 点坐标，到达后转入 AUTO_LAND。
-        """
-        self.target_pose = self._build_setpoint(
-            self.point_B["x"], self.point_B["y"], self.point_B["z"]
-        )
+        推进至下一航点或进入降落流程。
 
-        if self.is_arrived(self.point_B):
-            rospy.loginfo("[GO_TO_B] 已到达送货点 B，开始自动降落。")
+        - 如果还有剩余航点: current_wp_index 自增 → GO_TO_WAYPOINT
+        - 如果已是最后一个航点: → AUTO_LAND
+        """
+        if self.current_wp_index < len(self.waypoints) - 1:
+            self.current_wp_index += 1
+            idx = self.current_wp_index
+            total = len(self.waypoints) - 1
+            wp = self.waypoints[self.current_wp_index]
+            rospy.loginfo(
+                f"[ADVANCE] -> GO_TO_WAYPOINT[{idx}/{total}] "
+                f"({wp['x']:.1f}, {wp['y']:.1f}, {wp['z']:.1f})"
+            )
+            self.current_mission_state = "GO_TO_WAYPOINT"
+        else:
+            rospy.loginfo(
+                f"[ADVANCE] 所有 {len(self.waypoints)} 个航点已完成，开始自动降落。"
+            )
             self.current_mission_state = "AUTO_LAND"
-            rospy.loginfo("[GO_TO_B] -> AUTO_LAND")
+            rospy.loginfo("[ADVANCE] -> AUTO_LAND")
 
     def _handle_auto_land(self):
         """

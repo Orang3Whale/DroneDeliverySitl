@@ -1,30 +1,29 @@
 <?xml version="1.0"?>
 <!--
-  drone_delivery - 无人机自主送货任务启动文件
+  drone_delivery - 无人机自主多航点送货任务启动文件
 
   使用方法:
     roslaunch drone_delivery delivery_mission.launch
+    roslaunch drone_delivery delivery_mission.launch waypoints_file:=my_waypoints.yaml
 
   可选参数:
-    uav_namespace:  无人机命名空间 (支持多机扩展, 默认 /uav1)
-    takeoff_altitude: 起飞高度 (m, 默认 2.5)
-    position_tolerance: 到达判定阈值 (m, 默认 0.3)
-    hover_seconds: A 点悬停时长 (s, 默认 5.0)
-    point_A/x, point_A/y, point_A/z: A 点坐标 (m, 默认 4.0, 4.0, 2.5)
-    point_B/x, point_B/y, point_B/z: B 点坐标 (m, 默认 15.0, 12.0, 2.5)
+    uav_namespace:       无人机命名空间 (支持多机扩展, 默认 "")
+    takeoff_altitude:    起飞高度 (m, 默认 2.5)
+    position_tolerance:  到达判定阈值 (m, 默认 0.3)
+    waypoints_file:      航点 YAML 配置文件 (位于 drone_delivery/config/)
+
+  自定义航点示例 (waypoints.yaml):
+    waypoints:
+      - {x: 4.0, y: 4.0, z: 2.5, hover_time: 5.0}   # A点 取货
+      - {x: 15.0, y: 12.0, z: 2.5, hover_time: 0.0}  # B点 送货
+      - {x: 0.0, y: 0.0, z: 2.5, hover_time: 0.0}    # 返回原点
 -->
 <launch>
-  <!-- 本节点参数 -->
+  <!-- 基础参数 -->
   <arg name="uav_namespace"        default=""/>
   <arg name="takeoff_altitude"     default="2.5"/>
   <arg name="position_tolerance"   default="0.3"/>
-  <arg name="hover_seconds"        default="5.0"/>
-  <arg name="point_A_x"            default="4.0"/>
-  <arg name="point_A_y"            default="4.0"/>
-  <arg name="point_A_z"            default="2.5"/>
-  <arg name="point_B_x"            default="15.0"/>
-  <arg name="point_B_y"            default="12.0"/>
-  <arg name="point_B_z"            default="2.5"/>
+  <arg name="waypoints_file"       default="waypoints.yaml"/>
 
   <!-- 送货任务控制节点 -->
   <node name="px4_delivery_mission_node" pkg="drone_delivery"
@@ -33,15 +32,10 @@
     <param name="uav_namespace"       value="$(arg uav_namespace)"/>
     <param name="takeoff_altitude"    type="double" value="$(arg takeoff_altitude)"/>
     <param name="position_tolerance"  type="double" value="$(arg position_tolerance)"/>
-    <param name="hover_seconds"       type="double" value="$(arg hover_seconds)"/>
 
-    <!-- 使用 type="double" 确保参数服务器存储为数值而非字符串 -->
-    <param name="point_A/x" type="double" value="$(arg point_A_x)"/>
-    <param name="point_A/y" type="double" value="$(arg point_A_y)"/>
-    <param name="point_A/z" type="double" value="$(arg point_A_z)"/>
-    <param name="point_B/x" type="double" value="$(arg point_B_x)"/>
-    <param name="point_B/y" type="double" value="$(arg point_B_y)"/>
-    <param name="point_B/z" type="double" value="$(arg point_B_z)"/>
+    <!-- 从 YAML 文件加载航点列表到节点私有命名空间 -->
+    <rosparam command="load"
+              file="$(find drone_delivery)/config/$(arg waypoints_file)"/>
 
   </node>
 </launch>
