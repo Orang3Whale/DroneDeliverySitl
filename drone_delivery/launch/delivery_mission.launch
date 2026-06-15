@@ -15,7 +15,7 @@
 -->
 <launch>
   <!-- 本节点参数 -->
-  <arg name="uav_namespace"        default="/uav1"/>
+  <arg name="uav_namespace"        default=""/>
   <arg name="takeoff_altitude"     default="2.5"/>
   <arg name="position_tolerance"   default="0.3"/>
   <arg name="hover_seconds"        default="5.0"/>
