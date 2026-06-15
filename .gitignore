@@ -23,3 +23,4 @@ eggs/
 .DS_Store
 Thumbs.db
 .claude/
+ROS 无人机自主送货控制节点开发大纲 (Delivery Mission Node).md
