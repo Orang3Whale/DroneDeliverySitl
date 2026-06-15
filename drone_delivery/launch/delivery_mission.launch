@@ -31,21 +31,17 @@
         type="delivery_mission_node.py" output="screen">
 
     <param name="uav_namespace"       value="$(arg uav_namespace)"/>
-    <param name="takeoff_altitude"    value="$(arg takeoff_altitude)"/>
-    <param name="position_tolerance"  value="$(arg position_tolerance)"/>
-    <param name="hover_seconds"       value="$(arg hover_seconds)"/>
+    <param name="takeoff_altitude"    type="double" value="$(arg takeoff_altitude)"/>
+    <param name="position_tolerance"  type="double" value="$(arg position_tolerance)"/>
+    <param name="hover_seconds"       type="double" value="$(arg hover_seconds)"/>
 
-    <rosparam param="point_A">
-      x: $(arg point_A_x)
-      y: $(arg point_A_y)
-      z: $(arg point_A_z)
-    </rosparam>
-
-    <rosparam param="point_B">
-      x: $(arg point_B_x)
-      y: $(arg point_B_y)
-      z: $(arg point_B_z)
-    </rosparam>
+    <!-- 使用 type="double" 确保参数服务器存储为数值而非字符串 -->
+    <param name="point_A/x" type="double" value="$(arg point_A_x)"/>
+    <param name="point_A/y" type="double" value="$(arg point_A_y)"/>
+    <param name="point_A/z" type="double" value="$(arg point_A_z)"/>
+    <param name="point_B/x" type="double" value="$(arg point_B_x)"/>
+    <param name="point_B/y" type="double" value="$(arg point_B_y)"/>
+    <param name="point_B/z" type="double" value="$(arg point_B_z)"/>
 
   </node>
 </launch>

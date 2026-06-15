@@ -63,21 +63,22 @@ class PX4DeliveryDrone:
         # ------------------------------------------------------------------
         # 3. 任务核心参数定义
         # ------------------------------------------------------------------
-        self.takeoff_alt = rospy.get_param("~takeoff_altitude", 2.5)     # 起飞高度 (m)
-        self.pos_tolerance = rospy.get_param("~position_tolerance", 0.3) # 目标点到达判定阈值 (m)
-        self.hover_count_target = rospy.get_param("~hover_seconds", 5.0) # 悬停时长 (s)
+        # 显式 float() 转换，防止 launch 文件传入字符串类型 (如 rosparam + arg 替换)
+        self.takeoff_alt = float(rospy.get_param("~takeoff_altitude", 2.5))
+        self.pos_tolerance = float(rospy.get_param("~position_tolerance", 0.3))
+        self.hover_count_target = float(rospy.get_param("~hover_seconds", 5.0))
 
         # A 点坐标 (取货点)
         self.point_A = {
-            "x": rospy.get_param("~point_A/x", 4.0),
-            "y": rospy.get_param("~point_A/y", 4.0),
-            "z": rospy.get_param("~point_A/z", 2.5),
+            "x": float(rospy.get_param("~point_A/x", 4.0)),
+            "y": float(rospy.get_param("~point_A/y", 4.0)),
+            "z": float(rospy.get_param("~point_A/z", 2.5)),
         }
         # B 点坐标 (送货点)
         self.point_B = {
-            "x": rospy.get_param("~point_B/x", 15.0),
-            "y": rospy.get_param("~point_B/y", 12.0),
-            "z": rospy.get_param("~point_B/z", 2.5),
+            "x": float(rospy.get_param("~point_B/x", 15.0)),
+            "y": float(rospy.get_param("~point_B/y", 12.0)),
+            "z": float(rospy.get_param("~point_B/z", 2.5)),
         }
 
         # ------------------------------------------------------------------
