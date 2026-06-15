@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# ROS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# IDE
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+.claude/

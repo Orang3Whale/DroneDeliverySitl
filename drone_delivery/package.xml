@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>drone_delivery</name>
+  <version>0.1.0</version>
+  <description>
+    ROS 无人机自主送货控制包 (PX4 + Gazebo + MAVROS 仿真).
+    通过有限状态机驱动四旋翼完成 "起飞 -> 取货点A -> 送货点B -> 自动降落" 的全自主任务。
+  </description>
+
+  <maintainer email="whaleorang3@gmail.com">Orang3Whale</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>mavros_msgs</depend>
+  <depend>mavros</depend>
+
+  <export>
+  </export>
+</package>
